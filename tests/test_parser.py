@@ -8,7 +8,6 @@ class TestStreamParser:
     # 测试用例1: 自定义标签和多chunk测试（断言版）
     async def test_custom_tags_and_multi_chunk_with_assertions(self):
         """测试自定义标签以及标签内容被切割为多个chunk的情况"""
-        print("=== 测试自定义标签和多chunk（断言版） ===")
 
         # 定义自定义标签
         custom_tags = {
@@ -73,12 +72,9 @@ class TestStreamParser:
         step_names = [msg.step_name for msg in messages if msg]
         assert step_names == ["分析", "计算", "总结"], "步骤名称顺序应该正确"
 
-        print("✅ 自定义标签和多chunk测试通过")
-
     # 测试用例2: 不完整标签测试（断言版）
     async def test_incomplete_tags_with_assertions(self):
         """测试不完整或错误闭合的标签"""
-        print("=== 测试不完整标签（断言版） ===")
 
         tags = {"think": "思考", "tool": "工具调用"}
         parser = StreamParser(tags=tags)
@@ -112,12 +108,10 @@ class TestStreamParser:
         # 断言：验证步骤名称
         step_names = [msg.step_name for msg in messages if msg]
         assert "思考" in step_names or "工具调用" in step_names, "应该包含预定义的步骤名称"
-        print("✅ 不完整标签测试通过")
 
     # 测试用例3: 特殊字符测试（断言版）
     async def test_special_characters_with_assertions(self):
         """测试包含特殊字符的内容"""
-        print("=== 测试特殊字符（断言版） ===")
 
         tags = {"think": "思考", "tool": "工具调用"}
         parser = StreamParser(tags=tags)
@@ -147,12 +141,9 @@ class TestStreamParser:
             if msg:
                 assert msg.step_name in ["思考", "工具调用", "回答"], f"步骤名称'{msg.step_name}'应该是预定义值之一"
 
-        print("✅ 特殊字符测试通过")
-
     # 测试用例4: 空内容测试（断言版）
     async def test_empty_content_with_assertions(self):
         """测试空内容标签"""
-        print("=== 测试空内容（断言版） ===")
 
         tags = {"think": "思考", "tool": "工具调用"}
         parser = StreamParser(tags=tags)
@@ -176,12 +167,9 @@ class TestStreamParser:
         empty_messages = [msg for msg in messages if msg and not msg.content.strip()]
         # 注意：当前实现中空内容不会生成消息，所以这里不需要特别检查
 
-        print("✅ 空内容测试通过")
-
     # 测试用例5: 大量数据测试（断言版）
     async def test_large_data_with_assertions(self):
         """测试大量数据处理"""
-        print("=== 测试大量数据（断言版） ===")
 
         tags = {"think": "思考", "tool": "工具调用"}
         parser = StreamParser(tags=tags)
@@ -214,8 +202,6 @@ class TestStreamParser:
             msg = messages[0]
             assert msg.step == 1, "步骤号应该是1"
             assert msg.step_name == "思考", "步骤名称应该是'思考'"
-
-        print("✅ 大量数据测试通过")
 
     async def test_async_stream(self):
         """测试异步流处理"""
@@ -259,13 +245,11 @@ class TestStreamParser:
             chunk_messages = parser.parse_chunk(chunk)
             for message in chunk_messages:
                 messages.append(message)
-                print(message)
 
         # finalize() 只在流结束后调用一次
         final = parser.finalize()
         if final:
             messages.append(final)
-            print(final)
 
         # 验证消息数量和内容
         assert len(messages) > 0, "应该生成至少一条消息"
@@ -275,6 +259,24 @@ class TestStreamParser:
         assert "思考中" in step_names, "应该包含'思考中'步骤"
         assert "工具调用" in step_names, "应该包含'工具调用'步骤"
         assert "表单" in step_names, "应该包含'表单'步骤"
+
+        # 验证思考内容
+        think_messages = [msg for msg in messages if msg and msg.step_name == "思考中"]
+        assert len(think_messages) > 0, "应该有思考中消息"
+        assert any("我需要帮助用户查询天气" in msg.content for msg in think_messages), "思考内容应该完整"
+
+        # 验证工具调用内容
+        tools_messages = [msg for msg in messages if msg and msg.step_name == "工具调用"]
+        assert len(tools_messages) > 0, "应该有工具调用消息"
+        tools_content = "".join([msg.content for msg in tools_messages])
+        assert "get_weather" in tools_content, "应该包含get_weather工具调用"
+        assert "北京" in tools_content, "应该包含城市信息"
+        assert "calculate" in tools_content, "应该包含calculate工具调用"
+
+        # 验证表单内容
+        form_messages = [msg for msg in messages if msg and msg.step_name == "表单"]
+        assert len(form_messages) > 0, "应该有表单消息"
+        assert any("这是表单内容" in msg.content for msg in form_messages), "表单内容应该完整"
 
 
 # 如果直接运行此文件，执行所有测试
