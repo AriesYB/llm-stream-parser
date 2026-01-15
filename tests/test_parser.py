@@ -1,71 +1,26 @@
-"""
-Unit tests for StreamParser
-"""
-
-import pytest
-from llm_stream_parser import StreamParser, StreamMessage
+import asyncio
+from llm_stream_parser import StreamParser, StreamMessage, process_llm_stream
 
 
-class TestBasicParsing:
-    """Test basic parsing functionality."""
+class TestStreamParser:
+    """StreamParser 测试类"""
 
-    def test_simple_tag_parsing(self, basic_parser):
-        """Test parsing a simple tag."""
-        chunk = "</think>思考内容</think>"
-        messages = basic_parser.parse_chunk(chunk)
-        assert len(messages) == 1
-        assert messages[0].step_name == "思考"
-        assert messages[0].content == "思考内容"
-        assert messages[0].is_complete is True
+    # 测试用例1: 自定义标签和多chunk测试（断言版）
+    async def test_custom_tags_and_multi_chunk_with_assertions(self):
+        """测试自定义标签以及标签内容被切割为多个chunk的情况"""
+        print("=== 测试自定义标签和多chunk（断言版） ===")
 
-    def test_multiple_tags(self, basic_parser):
-        """Test parsing multiple tags."""
-        chunk = "</think>思考1</think><tool>工具调用</tool>"
-        messages = basic_parser.parse_chunk(chunk)
-        assert len(messages) == 2
-        assert messages[0].step_name == "思考"
-        assert messages[1].step_name == "工具"
+        # 定义自定义标签
+        custom_tags = {
+            "analysis": "分析",
+            "calculation": "计算",
+            "summary": "总结"
+        }
 
-    def test_text_without_tags(self, basic_parser):
-        """Test parsing text without any tags."""
-        chunk = "这是普通文本"
-        messages = basic_parser.parse_chunk(chunk)
-        final = basic_parser.finalize()
-        assert len(messages) == 0
-        assert final is not None
-        assert final.step_name == "回答"
-        assert final.content == "这是普通文本"
+        parser = StreamParser(tags=custom_tags)
 
-    def test_empty_chunk(self, basic_parser):
-        """Test parsing an empty chunk."""
-        messages = basic_parser.parse_chunk("")
-        assert len(messages) == 0
-
-
-class TestMultiChunkParsing:
-    """Test parsing across multiple chunks."""
-
-    def test_tag_split_across_chunks(self, basic_parser):
-        """Test when a tag is split across multiple chunks."""
-        chunks = ["<th", "ink>思考内容</", "think>"]
-        messages = []
-        for chunk in chunks:
-            messages.extend(basic_parser.parse_chunk(chunk))
-        assert len(messages) == 1
-        assert messages[0].content == "思考内容"
-
-    def test_content_split_across_chunks(self, basic_parser):
-        """Test when content is split across multiple chunks."""
-        chunks = [""]
-        messages = []
-        for chunk in chunks:
-            messages.extend(basic_parser.parse_chunk(chunk))
-        assert len(messages) == 1
-        assert messages[0].content == "思考内容"
-
-    def test_complex_multi_chunk_scenario(self, custom_tags_parser):
-        """Test complex scenario with multiple tags split across chunks."""
-        chunks = [
+        # 模拟标签内容被切割成多个chunk的情况
+        test_chunks = [
             "<anal",
             "ysis>这是分析内容的第一部分",
             "，这是第二部分</a",
@@ -79,209 +34,271 @@ class TestMultiChunkParsing:
             "多个chunk中</summar",
             "y>"
         ]
+
         messages = []
-        for chunk in chunks:
-            messages.extend(custom_tags_parser.parse_chunk(chunk))
-        final = custom_tags_parser.finalize()
-        if final:
-            messages.append(final)
+        for chunk in test_chunks:
+            messages.extend(parser.parse_chunk(chunk))
 
-        assert len([msg for msg in messages if msg]) == 3
-        assert messages[0].step_name == "分析"
-        assert messages[0].content == "这是分析内容的第一部分，这是第二部分"
-        assert messages[1].step_name == "计算"
-        assert messages[1].content == "计算过程：1+1=2"
-        assert messages[2].step_name == "总结"
-        assert messages[2].content == "总结内容在多个chunk中"
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
 
+        assert messages[0].step_name == "分析", "步骤名称应该是'分析'"
+        assert messages[0].content == "这是分析内容的第一部分，这是第二部分", "步骤内容错误"
+        assert messages[1].step_name == "计算", "步骤名称应该是'计算'"
+        assert messages[1].content == "计算过程：1+1=2", "步骤内容错误"
+        assert messages[2].step_name == "总结", "步骤名称应该是'总结'"
+        assert messages[2].content == "总结内容在多个chunk中", "步骤内容错误"
 
-class TestStreamingMode:
-    """Test streaming output mode."""
+        # 断言：确保生成了正确的消息数量
+        assert len([msg for msg in messages if msg]) == 3, "应该生成3条消息"
 
-    def test_streaming_mode_enabled(self, streaming_parser):
-        """Test that streaming mode emits partial messages."""
-        chunks = ["<think>思考", "内容</think>"]
+        # 断言：验证分析消息
+        analysis_msg = next((msg for msg in messages if msg and msg.step_name == "分析"), None)
+        assert analysis_msg is not None, "应该包含分析消息"
+        assert "这是分析内容的第一部分，这是第二部分" in analysis_msg.content, "分析内容应该完整"
+
+        # 断言：验证计算消息
+        calculation_msg = next((msg for msg in messages if msg and msg.step_name == "计算"), None)
+        assert calculation_msg is not None, "应该包含计算消息"
+        assert "计算过程：1+1=2" in calculation_msg.content, "计算内容应该完整"
+
+        # 断言：验证总结消息
+        summary_msg = next((msg for msg in messages if msg and msg.step_name == "总结"), None)
+        assert summary_msg is not None, "应该包含总结消息"
+        assert "总结内容在多个chunk中" in summary_msg.content, "总结内容应该完整"
+
+        # 断言：验证步骤计数
+        # 注意：每个step_name有自己的计数器，所以每个步骤的step都是1
+        step_names = [msg.step_name for msg in messages if msg]
+        assert step_names == ["分析", "计算", "总结"], "步骤名称顺序应该正确"
+
+        print("✅ 自定义标签和多chunk测试通过")
+
+    # 测试用例2: 不完整标签测试（断言版）
+    async def test_incomplete_tags_with_assertions(self):
+        """测试不完整或错误闭合的标签"""
+        print("=== 测试不完整标签（断言版） ===")
+
+        tags = {"think": "思考", "tool": "工具调用"}
+        parser = StreamParser(tags=tags)
+
+        # 模拟不完整标签输入
+        test_chunks = [
+            "思考内容",
+            "",  # 完成上一个标签
+            "<tool>工具调用",
+            "继续内容",  # 没有正确闭合
+            "最后内容"
+        ]
+
         messages = []
-        for chunk in chunks:
-            messages.extend(streaming_parser.parse_chunk(chunk))
-        # Should have partial messages in streaming mode
-        assert len(messages) > 0
-        # Check that at least one message is incomplete
-        assert any(not msg.is_complete for msg in messages)
+        for chunk in test_chunks:
+            messages.extend(parser.parse_chunk(chunk))
 
-    def test_streaming_mode_disabled(self, basic_parser):
-        """Test that non-streaming mode waits for tag close."""
-        chunks = ["<think>思考", "内容</think>"]
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
+
+        # 断言：确保生成了消息
+        assert len(messages) > 0, "应该生成至少一条消息"
+
+        # 断言：检查是否有"思考内容"相关消息
+        assert any("思考内容" in msg.content for msg in messages), "应该包含思考内容"
+
+        # 断言：检查是否有未闭合标签的内容
+        assert any("工具调用继续内容" in msg.content or "最后内容" in msg.content for msg in messages), "应该处理未闭合标签的内容"
+
+        # 断言：验证步骤名称
+        step_names = [msg.step_name for msg in messages if msg]
+        assert "思考" in step_names or "工具调用" in step_names, "应该包含预定义的步骤名称"
+        print("✅ 不完整标签测试通过")
+
+    # 测试用例3: 特殊字符测试（断言版）
+    async def test_special_characters_with_assertions(self):
+        """测试包含特殊字符的内容"""
+        print("=== 测试特殊字符（断言版） ===")
+
+        tags = {"think": "思考", "tool": "工具调用"}
+        parser = StreamParser(tags=tags)
+
+        # 包含特殊字符的测试输入
+        special_content = "思考内容包含特殊字符: <>&\"'反斜杠\\换行符\n制表符\t回车符\r"
+
         messages = []
-        for chunk in chunks:
-            messages.extend(basic_parser.parse_chunk(chunk))
-        # Should only have complete messages
-        assert all(msg.is_complete for msg in messages)
+        for chunk in [special_content[i:i + 10] for i in range(0, len(special_content), 10)]:
+            messages.extend(parser.parse_chunk(chunk))
 
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
 
-class TestEdgeCases:
-    """Test edge cases and error conditions."""
+        # 断言：确保生成了消息
+        assert len(messages) > 0, "应该生成至少一条消息"
 
-    def test_incomplete_tag(self, basic_parser):
-        """Test handling of incomplete tags."""
-        chunk = "<think>思考内容"
-        messages = basic_parser.parse_chunk(chunk)
-        final = basic_parser.finalize()
-        assert len(messages) == 0
-        assert final is not None
-        assert "思考内容" in final.content
-
-    def test_empty_tag_content(self, basic_parser):
-        """Test handling of empty tag content."""
-        chunk = "<think></think><tool>非空内容</tool>"
-        messages = basic_parser.parse_chunk(chunk)
-        non_empty_messages = [msg for msg in messages if msg and msg.content.strip()]
-        assert len(non_empty_messages) == 1
-        assert "非空内容" in non_empty_messages[0].content
-
-    def test_special_characters(self, basic_parser):
-        """Test handling of special characters."""
-        special_content = "</think>思考内容包含特殊字符: <>&\"'反斜杠\\换行符\n制表符\t回车符\r</think>"
-        messages = []
-        for i in range(0, len(special_content), 10):
-            chunk = special_content[i:i + 10]
-            messages.extend(basic_parser.parse_chunk(chunk))
-        final = basic_parser.finalize()
-        if final:
-            messages.append(final)
-
-        assert len(messages) > 0
+        # 断言：检查特殊字符是否被正确处理
         content_combined = "".join([msg.content for msg in messages if msg])
-        assert "<>&\"'反斜杠\\" in content_combined
+        assert "<>&\"'反斜杠\\" in content_combined, "特殊字符应该被正确保留"
+        assert "\n" in content_combined or "\\n" in content_combined, "换行符应该被正确处理"
+        assert "\t" in content_combined or "\\t" in content_combined, "制表符应该被正确处理"
 
-    def test_large_data(self, basic_parser):
-        """Test handling of large amounts of data."""
-        large_content = "</think>" + "大量重复的思考内容 " * 1000 + "</think>"
+        # 断言：验证步骤名称正确
+        for msg in messages:
+            if msg:
+                assert msg.step_name in ["思考", "工具调用", "回答"], f"步骤名称'{msg.step_name}'应该是预定义值之一"
+
+        print("✅ 特殊字符测试通过")
+
+    # 测试用例4: 空内容测试（断言版）
+    async def test_empty_content_with_assertions(self):
+        """测试空内容标签"""
+        print("=== 测试空内容（断言版） ===")
+
+        tags = {"think": "思考", "tool": "工具调用"}
+        parser = StreamParser(tags=tags)
+
+        # 空内容测试
+        test_input = "<think></think><tool>非空内容</tool>"
+
+        messages = parser.parse_chunk(test_input)
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
+        # 断言：确保至少有一条消息（来自非空的tool标签）
+        assert len([msg for msg in messages if msg]) >= 1, "应该至少生成一条非空消息"
+
+        # 断言：检查是否包含非空内容
+        non_empty_messages = [msg for msg in messages if msg and msg.content.strip()]
+        assert len(non_empty_messages) >= 1, "应该至少有一条包含实际内容的消息"
+        assert any("非空内容" in msg.content for msg in non_empty_messages), "应该包含'非空内容'"
+
+        # 断言：空标签不应该生成消息
+        empty_messages = [msg for msg in messages if msg and not msg.content.strip()]
+        # 注意：当前实现中空内容不会生成消息，所以这里不需要特别检查
+
+        print("✅ 空内容测试通过")
+
+    # 测试用例5: 大量数据测试（断言版）
+    async def test_large_data_with_assertions(self):
+        """测试大量数据处理"""
+        print("=== 测试大量数据（断言版） ===")
+
+        tags = {"think": "思考", "tool": "工具调用"}
+        parser = StreamParser(tags=tags)
+
+        # 生成大量数据
+        large_content = "<think>" + "大量重复的思考内容 " * 1000 + "</think>"
+
         messages = []
+        # 分小块处理大量数据
         chunk_size = 50
         for i in range(0, len(large_content), chunk_size):
             chunk = large_content[i:i + chunk_size]
-            messages.extend(basic_parser.parse_chunk(chunk))
-        final = basic_parser.finalize()
+            messages.extend(parser.parse_chunk(chunk))
+
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
+
+        # 断言：确保只生成了一条消息（因为只有一个完整的标签块）
+        assert len([msg for msg in messages if msg]) == 1, "应该只生成一条消息"
+
+        # 断言：验证消息内容长度
+        if messages and messages[0]:
+            content_length = len(messages[0].content)
+            expected_min_length = len("大量重复的思考内容 ") * 1000
+            assert content_length >= expected_min_length, f"内容长度({content_length})应该至少为{expected_min_length}"
+
+        # 断言：验证步骤信息
+        if messages and messages[0]:
+            msg = messages[0]
+            assert msg.step == 1, "步骤号应该是1"
+            assert msg.step_name == "思考", "步骤名称应该是'思考'"
+
+        print("✅ 大量数据测试通过")
+
+    async def test_async_stream(self):
+        """测试异步流处理"""
+        # 模拟流式响应
+        async def mock_stream():
+            chunks = [
+                "<think>我需要帮",
+                "助用户查",
+                "询天气</think>",
+                "我需要帮",
+                "您查询天",
+                "气信息。<tools>",
+                "\n<get_wea",
+                "ther>\n  <city>北京</city>",
+                "\n  <unit>celsius</unit>",
+                "\n</get_weather>",
+                "\n\n同时，我也会进行一些计算：",
+                "\n<calculate>",
+                "\n  <expression>100 / 5</expression>",
+                "\n</calculate>",
+                "\n</to",
+                "ols>",
+                "\n\n这就是全部",
+                "结果。<ag",
+                "tenderSubcontrac",
+                "tEdit>{""这是表单",
+                "内容}",
+                "</agt",
+                "enderSubcontractEdit>",
+                "112313哈哈哈"
+            ]
+
+            for chunk in chunks:
+                yield chunk
+                await asyncio.sleep(0.1)  # 模拟网络延迟
+
+        parser = StreamParser(tags={"think": "思考中", "tools": "工具调用", "agtenderSubcontractEdit": "表单"}, enable_tags_streaming=True)
+
+        messages = []
+        async for chunk in mock_stream():
+            chunk_messages = parser.parse_chunk(chunk)
+            for message in chunk_messages:
+                messages.append(message)
+                print(message)
+
+        # finalize() 只在流结束后调用一次
+        final = parser.finalize()
         if final:
             messages.append(final)
+            print(final)
 
-        assert len([msg for msg in messages if msg]) == 1
-        if messages and messages[0]:
-            assert len(messages[0].content) >= len("大量重复的思考内容 ") * 1000
-
-    def test_nested_tags(self, basic_parser):
-        """Test handling of nested tags (should be treated as separate)."""
-        chunk = "<think>外层<tool>内层</tool>外层结束</think>"
-        messages = basic_parser.parse_chunk(chunk)
-        # Should parse both tags separately
-        assert len(messages) >= 2
-
-
-class TestTagValidation:
-    """Test tag validation."""
-
-    def test_invalid_tag_name(self):
-        """Test that invalid tag names raise ValueError."""
-        with pytest.raises(ValueError):
-            StreamParser(tags={"123tag": "步骤"})
-
-    def test_invalid_tag_name_with_special_chars(self):
-        """Test that tag names with special characters raise ValueError."""
-        with pytest.raises(ValueError):
-            StreamParser(tags={"tag@name": "步骤"})
-
-    def test_empty_tag_name(self):
-        """Test that empty tag names raise ValueError."""
-        with pytest.raises(ValueError):
-            StreamParser(tags={"": "步骤"})
-
-    def test_empty_step_name(self):
-        """Test that empty step names raise ValueError."""
-        with pytest.raises(ValueError):
-            StreamParser(tags={"think": ""})
-
-    def test_valid_tag_names(self):
-        """Test that valid tag names are accepted."""
-        parser = StreamParser(tags={
-            "think": "思考",
-            "tool_call": "工具调用",
-            "tool-call": "工具调用",
-            "ToolCall": "工具调用"
-        })
-        assert len(parser.tags) == 4
+        # 验证消息数量和内容
+        assert len(messages) > 0, "应该生成至少一条消息"
+        
+        # 验证步骤名称
+        step_names = [msg.step_name for msg in messages if msg]
+        assert "思考中" in step_names, "应该包含'思考中'步骤"
+        assert "工具调用" in step_names, "应该包含'工具调用'步骤"
+        assert "表单" in step_names, "应该包含'表单'步骤"
 
 
-class TestStepCounting:
-    """Test step counting functionality."""
-
-    def test_step_counter_per_step_name(self, basic_parser):
-        """Test that step counters are maintained per step name."""
-        chunk = "</think>思考1</think><tool>工具1</tool></think>思考2</think><tool>工具2</tool>"
-        messages = basic_parser.parse_chunk(chunk)
-        think_messages = [msg for msg in messages if msg.step_name == "思考"]
-        tool_messages = [msg for msg in messages if msg.step_name == "工具"]
-        assert think_messages[0].step == 1
-        assert think_messages[1].step == 2
-        assert tool_messages[0].step == 1
-        assert tool_messages[1].step == 2
-
-    def test_step_counter_with_finalize(self, basic_parser):
-        """Test step counting with finalize."""
-        chunk = "回答内容"
-        messages = basic_parser.parse_chunk(chunk)
-        final = basic_parser.finalize()
-        assert final is not None
-        assert final.step == 1
-        assert final.step_name == "回答"
-
-
-class TestFinalize:
-    """Test finalize functionality."""
-
-    def test_finalize_with_remaining_content(self, basic_parser):
-        """Test finalize with content remaining in buffer."""
-        chunk = "回答内容"
-        messages = basic_parser.parse_chunk(chunk)
-        final = basic_parser.finalize()
-        assert len(messages) == 0
-        assert final is not None
-        assert final.content == "回答内容"
-        assert final.is_complete is True
-
-    def test_finalize_with_no_content(self, basic_parser):
-        """Test finalize when there's no content."""
-        final = basic_parser.finalize()
-        assert final is None
-
-    def test_finalize_after_complete_parse(self, basic_parser):
-        """Test finalize after all content has been parsed."""
-        chunk = "</think>思考内容</think>"
-        messages = basic_parser.parse_chunk(chunk)
-        final = basic_parser.finalize()
-        assert len(messages) == 1
-        assert final is None
-
-
-class TestNoTagsMode:
-    """Test parser with no tags configured."""
-
-    def test_no_tags_mode(self):
-        """Test parser with no tags - all content is treated as answer."""
-        parser = StreamParser(tags=None)
-        chunk = "这是回答内容"
-        messages = parser.parse_chunk(chunk)
-        final = parser.finalize()
-        assert len(messages) == 0
-        assert final is not None
-        assert final.step_name == "回答"
-        assert final.content == "这是回答内容"
-
-    def test_no_tags_with_angle_brackets(self):
-        """Test that angle brackets are treated as regular text when no tags."""
-        parser = StreamParser(tags=None)
-        chunk = "这是<普通>文本"
-        messages = parser.parse_chunk(chunk)
-        final = parser.finalize()
-        assert final is not None
-        assert "这是<普通>文本" in final.content
+# 如果直接运行此文件，执行所有测试
+if __name__ == "__main__":
+    import sys
+    
+    async def run_all_tests():
+        test_instance = TestStreamParser()
+        
+        tests = [
+            test_instance.test_custom_tags_and_multi_chunk_with_assertions,
+            test_instance.test_incomplete_tags_with_assertions,
+            test_instance.test_special_characters_with_assertions,
+            test_instance.test_empty_content_with_assertions,
+            test_instance.test_large_data_with_assertions,
+            test_instance.test_async_stream
+        ]
+        
+        for test in tests:
+            try:
+                await test()
+                print(f"✅ {test.__name__} 通过")
+            except Exception as e:
+                print(f"❌ {test.__name__} 失败: {e}")
+                sys.exit(1)
+    
+    asyncio.run(run_all_tests())

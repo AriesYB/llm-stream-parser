@@ -1,3 +1,1 @@
-"""
-Tests for LLM Stream Parser
-"""
+# Tests package
