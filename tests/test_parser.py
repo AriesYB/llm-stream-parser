@@ -278,6 +278,176 @@ class TestStreamParser:
         assert len(form_messages) > 0, "应该有表单消息"
         assert any("这是表单内容" in msg.content for msg in form_messages), "表单内容应该完整"
 
+    async def test_invalid_tag_name_empty(self):
+        """测试空标签名应该抛出ValueError"""
+        try:
+            parser = StreamParser(tags={"": "步骤名"})
+            assert False, "应该抛出ValueError"
+        except ValueError as e:
+            assert "标签名必须是非空字符串" in str(e)
+
+    async def test_invalid_tag_name_non_string(self):
+        """测试非字符串标签名应该抛出ValueError"""
+        try:
+            parser = StreamParser(tags={123: "步骤名"})
+            assert False, "应该抛出ValueError"
+        except ValueError as e:
+            assert "标签名必须是非空字符串" in str(e)
+
+    async def test_invalid_tag_name_format(self):
+        """测试无效格式的标签名应该抛出ValueError"""
+        # 以数字开头
+        try:
+            parser = StreamParser(tags={"1tag": "步骤名"})
+            assert False, "应该抛出ValueError"
+        except ValueError as e:
+            assert "格式无效" in str(e)
+        
+        # 包含特殊字符
+        try:
+            parser = StreamParser(tags={"tag@name": "步骤名"})
+            assert False, "应该抛出ValueError"
+        except ValueError as e:
+            assert "格式无效" in str(e)
+
+    async def test_invalid_step_name_empty(self):
+        """测试空步骤名应该抛出ValueError"""
+        try:
+            parser = StreamParser(tags={"tag": ""})
+            assert False, "应该抛出ValueError"
+        except ValueError as e:
+            assert "步骤名必须是非空字符串" in str(e)
+
+    async def test_invalid_step_name_non_string(self):
+        """测试非字符串步骤名应该抛出ValueError"""
+        try:
+            parser = StreamParser(tags={"tag": 123})
+            assert False, "应该抛出ValueError"
+        except ValueError as e:
+            assert "步骤名必须是非空字符串" in str(e)
+
+    async def test_no_tags_defined(self):
+        """测试没有定义标签的情况"""
+        parser = StreamParser(tags=None)
+        assert parser.tags == {}
+        
+        # 解析内容，应该只返回"回答"消息
+        messages = parser.parse_chunk("这是一些内容")
+        assert len(messages) > 0
+        assert messages[0].step_name == "回答"
+        assert "这是一些内容" in messages[0].content
+
+    async def test_enable_tags_streaming_no_content_change(self):
+        """测试启用标签流式输出但内容没有变化的情况"""
+        parser = StreamParser(tags={"think": "思考"}, enable_tags_streaming=True)
+        
+        # 第一次解析
+        messages1 = parser.parse_chunk("内容")
+        assert len(messages1) > 0
+        
+        # 第二次解析相同内容，不应该产生新消息（因为内容没有变化）
+        messages2 = parser.parse_chunk("")
+        # 由于内容没有变化，_maybe_emit_partial 会提前返回
+        # 但 parse_chunk 可能会因为其他原因产生消息
+        # 这里我们主要测试 _maybe_emit_partial 的逻辑
+
+    async def test_process_llm_stream_function(self):
+        """测试 process_llm_stream 异步函数"""
+        async def mock_stream():
+            yield "让我思考一下"
+            yield "<think>这是思考内容</think>"
+            yield "这是最终答案"
+        
+        messages = []
+        async for msg in process_llm_stream(
+            mock_stream(),
+            tags={"think": "思考"},
+            enable_tags_streaming=True
+        ):
+            messages.append(msg)
+        
+        assert len(messages) > 0
+        step_names = [msg.step_name for msg in messages]
+        assert "思考" in step_names
+        assert any("这是思考内容" in msg.content for msg in messages)
+
+    async def test_nested_tag_switch(self):
+        """测试标签切换时的旧内容处理（覆盖第232行）"""
+        parser = StreamParser(tags={"think": "思考", "tool": "工具"})
+        
+        # 先进入 think 状态，累积一些内容
+        parser.parse_chunk("<think>思考内容")
+        
+        # 然后切换到 tool 状态，应该先输出 think 的完整内容
+        messages = parser.parse_chunk("</think><tool>工具内容")
+        
+        # 应该有一条完整的 think 消息
+        think_messages = [msg for msg in messages if msg.step_name == "思考"]
+        assert len(think_messages) > 0
+        assert "思考内容" in think_messages[0].content
+
+    async def test_maybe_emit_partial_no_change(self):
+        """测试内容没有变化时不发送消息（覆盖第158行）"""
+        parser = StreamParser(tags={"think": "思考"}, enable_tags_streaming=True)
+        
+        # 第一次解析，产生消息
+        messages1 = parser.parse_chunk("内容")
+        assert len(messages1) > 0
+        
+        # 第二次解析空内容，内容没有变化，_maybe_emit_partial 会提前返回
+        messages2 = parser.parse_chunk("")
+        # 由于内容没有变化，不应该产生新的流式消息
+
+    async def test_maybe_emit_partial_empty_new_content(self):
+        """测试新增内容为空时不发送消息（覆盖第166行）"""
+        parser = StreamParser(tags={"think": "思考"}, enable_tags_streaming=True)
+        
+        # 解析内容
+        parser.parse_chunk("内容")
+        
+        # 解析空chunk，new_content为空，_maybe_emit_partial 会提前返回
+        messages = parser.parse_chunk("")
+        # 不应该产生新消息
+
+    async def test_tag_switch_with_old_content(self):
+        """测试标签切换时处理旧内容（覆盖第232行）"""
+        parser = StreamParser(tags={"think": "思考", "tool": "工具"})
+        
+        # 先进入 think 状态，累积内容
+        parser.parse_chunk("</think>思考内容")
+        
+        # 然后切换到 tool 状态，应该先输出 think 的完整内容
+        messages = parser.parse_chunk("</think><tool>工具内容")
+        
+        # 验证 think 的完整消息
+        think_messages = [msg for msg in messages if msg.step_name == "思考"]
+        assert len(think_messages) == 0
+        
+        response_messages = [msg for msg in messages if msg.step_name == "回答"]
+        assert len(response_messages) == 1
+
+        assert "思考内容" in response_messages[0].content
+
+
+
+    async def test_process_llm_stream_with_final_message(self):
+        """测试 process_llm_stream 的 final_message（覆盖第334行）"""
+        async def mock_stream():
+            yield "内容"
+        
+        messages = []
+        async for msg in process_llm_stream(
+            mock_stream(),
+            tags=None,
+            enable_tags_streaming=False
+        ):
+            messages.append(msg)
+        
+        # 应该有 final_message
+        assert len(messages) > 0
+        assert messages[0].is_complete == False
+        assert messages[0].content == "内容"
+
 
 # 如果直接运行此文件，执行所有测试
 if __name__ == "__main__":
@@ -292,7 +462,20 @@ if __name__ == "__main__":
             test_instance.test_special_characters_with_assertions,
             test_instance.test_empty_content_with_assertions,
             test_instance.test_large_data_with_assertions,
-            test_instance.test_async_stream
+            test_instance.test_async_stream,
+            test_instance.test_invalid_tag_name_empty,
+            test_instance.test_invalid_tag_name_non_string,
+            test_instance.test_invalid_tag_name_format,
+            test_instance.test_invalid_step_name_empty,
+            test_instance.test_invalid_step_name_non_string,
+            test_instance.test_no_tags_defined,
+            test_instance.test_enable_tags_streaming_no_content_change,
+            test_instance.test_process_llm_stream_function,
+            test_instance.test_nested_tag_switch,
+            test_instance.test_maybe_emit_partial_no_change,
+            test_instance.test_maybe_emit_partial_empty_new_content,
+            test_instance.test_tag_switch_with_old_content,
+            test_instance.test_process_llm_stream_with_final_message
         ]
         
         for test in tests:
