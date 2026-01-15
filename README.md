@@ -1,8 +1,8 @@
 # LLM Stream Parser
 
 [![Tests](https://github.com/AriesYB/llm-stream-parser/actions/workflows/test.yml/badge.svg?branch=master)](https://github.com/AriesYB/llm-stream-parser/actions/workflows/test.yml)
-[![PyPI](https://img.shields.io/pypi/v/llm-stream-parser)](https://pypi.org/project/llm-stream-parser/)
-[![Python](https://img.shields.io/pypi/pyversions/llm-stream-parser)](https://pypi.org/project/llm-stream-parser/)
+[![PyPI](https://img.shields.io/pypi/v/llm-stream-parser?color=blue)](https://pypi.org/project/llm-stream-parser/)
+[![Python](https://img.shields.io/pypi/pyversions/llm-stream-parser?color=blue)](https://pypi.org/project/llm-stream-parser/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 一个用于实时解析大语言模型（LLM）流式响应的 Python 库，支持基于 XML 标签提取内容。
