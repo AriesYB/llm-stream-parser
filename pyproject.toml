@@ -25,6 +25,8 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.0.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.24.0",
 ]
 
 [project.optional-dependencies]
@@ -38,10 +40,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/llm-stream-parser"
-Documentation = "https://github.com/yourusername/llm-stream-parser#readme"
-Repository = "https://github.com/yourusername/llm-stream-parser"
-Issues = "https://github.com/yourusername/llm-stream-parser/issues"
+Homepage = "https://github.com/AriesYB/llm-stream-parser"
+Documentation = "https://github.com/AriesYB/llm-stream-parser#readme"
+Repository = "https://github.com/AriesYB/llm-stream-parser"
+Issues = "https://github.com/AriesYB/llm-stream-parser/issues"
 
 [build-system]
 requires = ["hatchling"]

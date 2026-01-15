@@ -310,7 +310,8 @@ class StreamParser:
 # 流式处理包装函数
 async def process_llm_stream(
         stream: AsyncGenerator[str, None],
-        tags: Optional[Dict[str, str]] = None
+        tags: Optional[Dict[str, str]] = None,
+        enable_tags_streaming: bool = False
 ) -> AsyncGenerator[StreamMessage, None]:
     """
     处理LLM流式响应的包装函数
@@ -318,11 +319,12 @@ async def process_llm_stream(
     Args:
         stream: 原始的文本流
         tags: 自定义标签字典，用于解析特定标签
+        enable_tags_streaming: 标签内内容流式输出
 
     Yields:
         解析后的StreamMessage对象
     """
-    parser = StreamParser(tags=tags)
+    parser = StreamParser(tags=tags, enable_tags_streaming=enable_tags_streaming)
     async for chunk in stream:
         messages = parser.parse_chunk(chunk)
         for message in messages:
