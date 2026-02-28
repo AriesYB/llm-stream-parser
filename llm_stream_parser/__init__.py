@@ -6,9 +6,9 @@ Supports real-time parsing of structured content embedded in streaming text.
 """
 
 
-__version__ = "0.1.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__version__ = "0.1.2"
+__author__ = "AriesYB"
+__email__ = "37505429+AriesYB@users.noreply.github.com"
 
 __all__ = [
     "StreamParser",
