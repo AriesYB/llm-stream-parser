@@ -223,26 +223,26 @@ class StreamParser:
                     self.last_sent_content = ""
                     content_added = False  # 重置标记，因为内容已经被处理
             else:
-                # 在切换到新状态之前，先处理掉当前已经累积的内容
-                if self.current_content:
-                    if self.current_state == "IDLE":
+                # 只有在IDLE状态时才能进入新的标签状态
+                # 如果当前已经在某个标签状态中，新的开始标签应该作为普通文本处理
+                if self.current_state != "IDLE":
+                    # 当前在标签状态中，不解析新的开始标签，将其作为普通文本
+                    # 不更新last_pos，这样标签会被包含在剩余文本中
+                    continue
+                else:
+                    # 在切换到新状态之前，先处理掉当前已经累积的内容
+                    if self.current_content:
                         step_name_for_old_content = "回答"
-                    else:
-                        # 如果当前在某个标签状态中，使用该标签的步骤名
-                        step_name_for_old_content = next(
-                            (name for state, name in self.tag_map.values() if state == self.current_state),
-                            "回答"
-                        )
-                    # 生成完整消息时，使用当前内容的完整副本
-                    message = self._generate_message(step_name_for_old_content, self.current_content, is_complete=True)
-                    if message:
-                        messages.append(message)
+                        # 生成完整消息时，使用当前内容的完整副本
+                        message = self._generate_message(step_name_for_old_content, self.current_content, is_complete=True)
+                        if message:
+                            messages.append(message)
 
-                new_state, step_name = self.tag_map.get(tag_name, ("IDLE", "回答"))
-                self.current_state = new_state
-                self.current_content = ""
-                self.last_sent_content = ""
-                content_added = False  # 重置标记，因为内容已经被处理
+                    new_state, step_name = self.tag_map.get(tag_name, ("IDLE", "回答"))
+                    self.current_state = new_state
+                    self.current_content = ""
+                    self.last_sent_content = ""
+                    content_added = False  # 重置标记，因为内容已经被处理
 
             last_pos = end
 

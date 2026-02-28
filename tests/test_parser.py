@@ -448,6 +448,113 @@ class TestStreamParser:
         assert messages[0].is_complete == False
         assert messages[0].content == "内容"
 
+    async def test_unclosed_think_with_nested_tools(self):
+        """测试think标签未闭合时，不应该解析出嵌套的tools标签"""
+        parser = StreamParser(tags={"think": "思考", "tools": "工具调用"})
+        
+        # 模拟think标签未闭合，但其中包含tools标签的情况
+        test_chunks = [
+            "<think>我需要思考一下",
+            "，然后调用工具",
+            "<tools>",
+            "  <get_weather>",
+            "    <city>北京</city>",
+            "  </get_weather>",
+            # 注意：think标签没有闭合，tools标签也没有闭合
+        ]
+        
+        messages = []
+        for chunk in test_chunks:
+            messages.extend(parser.parse_chunk(chunk))
+        
+        # finalize处理剩余内容
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
+        
+        # 断言：不应该有"工具调用"步骤的消息
+        tools_messages = [msg for msg in messages if msg and msg.step_name == "工具调用"]
+        assert len(tools_messages) == 0, "think标签未闭合时，不应该解析出tools标签"
+        
+        # 断言：所有内容应该都在"思考"或"回答"中
+        # 由于think未闭合，tools标签会被当作普通文本处理
+        all_content = "".join([msg.content for msg in messages if msg])
+        assert "我需要思考一下，然后调用工具" in all_content, "思考内容应该存在"
+        assert "<tools>" in all_content or "tools" in all_content, "tools标签应该作为普通文本被保留"
+        
+        # 断言：验证步骤名称
+        step_names = [msg.step_name for msg in messages if msg]
+        assert "工具调用" not in step_names, "不应该有'工具调用'步骤"
+
+    async def test_think_with_tools_then_answer_with_tools(self):
+        """测试think标签内有工具调用（作为文本），think闭合后回答中也有工具调用（正常解析）"""
+        parser = StreamParser(tags={"think": "思考", "tools": "工具调用"}, enable_tags_streaming=False)
+        
+        # 模拟完整的流程：
+        # 1. think标签未闭合，包含tools标签（应该作为普通文本）
+        # 2. think标签闭合
+        # 3. 回答阶段包含tools标签（应该正常解析）
+        test_chunks = [
+            "<think>我需要思考一下",
+            "，然后调用工具",
+            "<tools>",
+            "  <get_weather>",
+            "    <city>北京</city>",
+            "  </get_weather>",
+            "</think>",  # think标签闭合
+            "现在开始回答问题",
+            "，我需要再次调用工具",
+            "<tools>",
+            "  <calculate>",
+            "    <expression>1+1</expression>",
+            "  </calculate>",
+            "</tools>",  # tools标签闭合
+            "这就是答案",
+        ]
+        
+        messages = []
+        for chunk in test_chunks:
+            messages.extend(parser.parse_chunk(chunk))
+        
+        # finalize处理剩余内容
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
+        
+        # 断言：验证消息数量
+        non_empty_messages = [msg for msg in messages if msg]
+        print(non_empty_messages)
+        assert len(non_empty_messages) >= 3, "应该至少有3条消息（思考、工具调用、回答）"
+        
+        # 断言：验证思考消息
+        think_messages = [msg for msg in non_empty_messages if msg.step_name == "思考"]
+        assert len(think_messages) >= 1, "应该有1条思考消息"
+        think_content = think_messages[0].content
+        assert "我需要思考一下，然后调用工具" in think_content, "思考内容应该包含前半部分"
+        assert "<tools>" in think_content, "think中的tools标签应该作为普通文本保留"
+        assert "get_weather" in think_content, "think中的工具调用内容应该保留"
+        
+        # 断言：验证工具调用消息（来自回答阶段的tools）
+        tools_messages = [msg for msg in non_empty_messages if msg.step_name == "工具调用"]
+        assert len(tools_messages) == 1, "应该有1条工具调用消息（来自回答阶段）"
+        tools_content = tools_messages[0].content
+        assert "calculate" in tools_content, "应该包含calculate工具调用"
+        assert "1+1" in tools_content, "应该包含计算表达式"
+        
+        # 断言：验证回答消息
+        answer_messages = [msg for msg in non_empty_messages if msg.step_name == "回答"]
+        assert len(answer_messages) >= 1, "应该至少有1条回答消息"
+        all_answer_content = "".join([msg.content for msg in answer_messages])
+        assert "现在开始回答问题" in all_answer_content, "应该包含回答内容"
+        assert "这就是答案" in all_answer_content, "应该包含最终答案"
+        
+        # 断言：验证步骤顺序
+        step_names = [msg.step_name for msg in non_empty_messages]
+        # 顺序应该是：思考 -> 工具调用 -> 回答（可能有多条回答消息）
+        assert step_names[0] == "思考", "第一条消息应该是思考"
+        assert "工具调用" in step_names, "应该包含工具调用步骤"
+        assert "回答" in step_names, "应该包含回答步骤"
+
 
 # 如果直接运行此文件，执行所有测试
 if __name__ == "__main__":
@@ -475,7 +582,9 @@ if __name__ == "__main__":
             test_instance.test_maybe_emit_partial_no_change,
             test_instance.test_maybe_emit_partial_empty_new_content,
             test_instance.test_tag_switch_with_old_content,
-            test_instance.test_process_llm_stream_with_final_message
+            test_instance.test_process_llm_stream_with_final_message,
+            test_instance.test_unclosed_think_with_nested_tools,
+            test_instance.test_think_with_tools_then_answer_with_tools
         ]
         
         for test in tests:
