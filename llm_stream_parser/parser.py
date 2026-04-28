@@ -37,6 +37,10 @@ class StreamParser:
         self.tag_map = self._create_tag_map()
         self.tag_pattern = self._create_tag_pattern()
 
+    def _get_step_name_for_tag(self, tag_name: str) -> str:
+        """根据标签名获取步骤名称。"""
+        return self.tag_map.get(tag_name, ("IDLE", "回答"))[1]
+
     def _validate_tags(self, tags: Dict[str, str]) -> Dict[str, str]:
         """
         验证标签配置的有效性
@@ -182,6 +186,26 @@ class StreamParser:
             # 立即更新last_sent_content，避免重复发送
             self.last_sent_content = self.current_content
 
+    def _maybe_emit_tag_boundary(
+            self,
+            messages: List[StreamMessage],
+            tag_name: str,
+            is_closing_tag: bool
+    ) -> None:
+        """
+        在启用标签流式输出时，发出标签边界消息。
+
+        这样调用方可以在流式消费时还原出原始标签结构，而不需要自行补标签。
+        """
+        if not self.enable_tags_streaming:
+            return
+
+        step_name = self._get_step_name_for_tag(tag_name)
+        tag_text = f"</{tag_name}>" if is_closing_tag else f"<{tag_name}>"
+        message = self._generate_message(step_name, tag_text, is_complete=False)
+        if message:
+            messages.append(message)
+
     def parse_chunk(self, chunk: str) -> List[StreamMessage]:
         """
         解析一个新的 chunk，返回一个或多个完整的 StreamMessage
@@ -208,11 +232,14 @@ class StreamParser:
             if text_before_tag:
                 self.current_content += text_before_tag
                 content_added = True
+                # 如果标签内容和边界出现在同一个 chunk 中，需要在状态切换前先发出增量内容。
+                self._maybe_emit_partial(messages)
 
             # 2. 处理标签本身，进行状态转换
             if is_closing_tag:
                 expected_state, step_name = self.tag_map.get(tag_name, (None, None))
                 if self.current_state == expected_state:
+                    self._maybe_emit_tag_boundary(messages, tag_name, is_closing_tag=True)
                     # 生成完整消息时，使用当前内容的完整副本
                     message = self._generate_message(step_name, self.current_content, is_complete=True)
                     if message:
@@ -243,6 +270,7 @@ class StreamParser:
                     self.current_content = ""
                     self.last_sent_content = ""
                     content_added = False  # 重置标记，因为内容已经被处理
+                    self._maybe_emit_tag_boundary(messages, tag_name, is_closing_tag=False)
 
             last_pos = end
 

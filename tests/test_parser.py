@@ -371,6 +371,28 @@ class TestStreamParser:
         assert "思考" in step_names
         assert any("这是思考内容" in msg.content for msg in messages)
 
+    async def test_enable_tags_streaming_emits_tag_boundaries(self):
+        """测试启用标签流式输出时会保留标签边界消息"""
+        parser = StreamParser(tags={"think": "思考"}, enable_tags_streaming=True)
+
+        messages = []
+        messages.extend(parser.parse_chunk("<think>这是"))
+        messages.extend(parser.parse_chunk("思考</think>"))
+
+        final_message = parser.finalize()
+        if final_message:
+            messages.append(final_message)
+
+        think_stream_messages = [
+            msg for msg in messages
+            if msg.step_name == "思考" and msg.is_complete is False
+        ]
+        think_stream_content = "".join(msg.content for msg in think_stream_messages)
+
+        assert "<think>" in think_stream_content
+        assert "这是思考" in think_stream_content
+        assert "</think>" in think_stream_content
+
     async def test_nested_tag_switch(self):
         """测试标签切换时的旧内容处理（覆盖第232行）"""
         parser = StreamParser(tags={"think": "思考", "tool": "工具"})
@@ -578,6 +600,7 @@ if __name__ == "__main__":
             test_instance.test_no_tags_defined,
             test_instance.test_enable_tags_streaming_no_content_change,
             test_instance.test_process_llm_stream_function,
+            test_instance.test_enable_tags_streaming_emits_tag_boundaries,
             test_instance.test_nested_tag_switch,
             test_instance.test_maybe_emit_partial_no_change,
             test_instance.test_maybe_emit_partial_empty_new_content,
